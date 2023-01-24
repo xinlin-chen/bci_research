@@ -3,7 +3,7 @@
 """
 @author: xinlin.chen@duke.edu
 
-Last edited 23/01/23
+Last edited 2023/01/24
 """
 
 import pandas as pd
@@ -11,9 +11,7 @@ import numpy as np
 from re import search
 from os import walk
 from glob import glob
-#from pyedflib import EdfReader
 from mne.io import read_raw_edf
-#from time import time
 import pickle
 import math
 from scipy.stats import mode
@@ -24,39 +22,8 @@ from general_functions import deal, offset_range
 from sklearn.metrics import roc_auc_score as get_auc
 import string
 from language_model import viterbi_alg
-from platform import system
-from bci_functions_matlab import load_data
 from matplotlib import pyplot as plt
-
-def search_folder(path,search_str):
-    (_,_, all_files) = next(walk(path))
-    files = [s for s in all_files if search(search_str,s)]#re.search(all_files,'*.dat')
-    return files
-
-def load_eeg_from_edf(filename,epoch_spacing_s=0.1875,sample_window_s=195/256,ch_name_filter=None):
-    """
-    Args:
-        filename (str): path to EDF file
-        epoch_spacing_s (float): spacing between start of one EEG epoch and the
-                                next (in seconds)
-        sample_window_s (float): length of each EEG epoch (in seconds)
-        ch_name_filter (float): 
-    """
-    # Assumes external (non-AMLL) EEG source (e.g. Physionet, TUEG)
-    edf_data = read_raw_edf(filename,verbose=False,preload=True)
-    fs = edf_data.info['sfreq']
-    # Select relevant channels based on name filter (e.g. remove channels labelled 'EMG')
-    if ch_name_filter:
-        ch_inds,ch_names = zip(*[(i,j) for (i,j) in enumerate(edf_data.ch_names) if ch_name_filter(j)])
-        return edf_data._data[ch_inds,:]
-    else:
-        return edf_data._data
-    # Impose desired spacing between EEG epoch starts for non-P300 speller EEG data
-    """
-    return extract_eeg_epochs(edf_data._data,
-                       task_onset=np.arange(0,np.shape(edf_data._data)[1],math.ceil(epoch_spacing_s*fs)),
-                       sample_window = math.ceil(sample_window_s*fs))"""
-
+from general_functions import Array
 
 def get_sample_window(fs=256,wlen=0.8,decimation_f=20):
     sampling_factor = math.ceil(fs/decimation_f)
@@ -64,8 +31,8 @@ def get_sample_window(fs=256,wlen=0.8,decimation_f=20):
     sample_window = int(feats_per_channel*sampling_factor)
     return sample_window
 
-def get_eeg_context_windows(task_onset,obs_window_samples,
-                            model_stride_samples,max_context_window_samples):
+def get_p300sp_context_windows(task_onset,obs_window_samples,
+                               model_stride_samples,max_context_window_samples):
     """
     Calculate start and end of context windows for a series of stimuli. Each
     context window ends at obs_window_samples*current_task_onset and starts
@@ -74,8 +41,8 @@ def get_eeg_context_windows(task_onset,obs_window_samples,
     stretch to before the first stimulus onset.
     
     Args:
-        task_onset ((N,) array): EEG signal sample indices at which a stimulus
-            was presented (i.e. onset of flash)
+        task_onset (Array['N',int]): EEG signal sample indices at which N stimuli
+            were presented (i.e. onset of flash)
         obs_window_samples (int): length of observation window in samples
         model_stride_samples (int): sample stride (effective sampling
             frequency) of model that will process the EEG
@@ -84,8 +51,8 @@ def get_eeg_context_windows(task_onset,obs_window_samples,
             after a flash onset
     
     Returns:
-        eeg_context (Nx3 array): each row contains
-            (task_onset,context_window_start,context_window_end)
+        eeg_context (Array['N,3',int]): each of N rows contains
+        	(task_onset,context_window_start,context_window_end) for the N-th stimulus
     """
     eeg_context = np.zeros((len(task_onset),3),dtype='int')
     # Max context window size must be multiple of model stride
@@ -104,11 +71,10 @@ def get_eeg_context_windows(task_onset,obs_window_samples,
     return eeg_context
 
 def extract_eeg_epochs(signal,task_onset,sample_window=195,offset=0,path=''):
-    """
+    """Extract EEG epochs.
+    
     Extract time-locked EEG epochs from user data, given an
-    array of signals and information about flash onset
-    #obs x sample_window x #channels
-    offset is in samples
+    array of signals and information about flash onset.
     """
     
     eeg_signals = np.zeros([len(task_onset),sample_window,np.shape(signal)[1]])
@@ -123,18 +89,18 @@ def extract_eeg_epochs(signal,task_onset,sample_window=195,offset=0,path=''):
     return eeg_signals
 
 def segment_signal(signal,fs,wlen=0.8,wstep=0.25):
-    """
+    """Split up signal into segments.
     
     Split signal up into segments of length <wlen>, taking a step of <wstep>
-    each time
+    each time.
     
     Args:
-        signal (num_samples array): EEG signal (single-channel)
-        fs (float): sampling frequency (Hz)
+        signal (Array['num_samples', float]): EEG signal (single-channel)
+        fs (int): sampling frequency (Hz)
         wlen (float): window length (s)
         wstep (float): window step (s)
     Returns:
-        sig_frags (num_obsxsample_window array): segmented EEG signals
+        sig_frags (Array['num_obs,sample_window',float])): segmented EEG signals
     """
     
     signal = signal.squeeze()
@@ -153,34 +119,35 @@ def segment_signal(signal,fs,wlen=0.8,wstep=0.25):
 
 
 class Speller:
+	"""
+	For performing offline spelling simulations with brain signal data. Presently
+    implemented for data collected using the checkerboard paradigm. This speller can use
+    static or dynamic stopping. The classifier may be static or adaptive (i.e., supports
+    being updated with new data).
+    
+    Attributes:
+    	num_sessions (int): max number of sessions that a user went in for
+        num_subjects (int): number of subjects in study
+        adaptive (bool): adaptive speller (i.e. can be re-trained)?
+        dynamic (bool): use dynamic stopping
+        ds_threshold_val (bool): for dynamic stopping, at what probability
+            threshold do we stop spelling?
+        use_row_column (bool): row-column (true) or other stimulus presentation paradigm?
+        label_type (str): 'scores' (sum of classifier scores) or
+            'likelihoods' (Bayesian algorithm)
+        set_ada_threshold (bool): set character score threshold for
+            expanding training set with unsupervised data (unlabelled
+            'online' data and classifier-predicted labels)?
+        ada_threshold_val (float): threshold value for above
+        get_performance (bool): collect data to calculate performance
+            measures (e.g. sum of true positives for each trial)?
+	"""
     def __init__(self,num_sessions=1, num_subjects=1,adaptive=False,
                  dynamic=False,ds_threshold_val=0.9,
                  use_row_column=False,label_type='likelihoods',
                  set_ada_threshold=True,ada_threshold_val=None,
                  get_performance=False):
-        """
-        For performing offline spelling simulations with brain signal data. Presently
-        implemented for data collected using the checkerboard paradigm. This speller can
-        use static or dynamic stopping. The classifier may be static or adaptive (i.e.,
-        supports being updated with new data).
-
-        Args:
-            num_sessions (int): max number of sessions that a user went in for
-            num_subjects (int): number of subjects in study
-            adaptive (bool): adaptive speller (i.e. can be re-trained)?
-            dynamic (bool): use dynamic stopping
-            ds_threshold_val (bool): for dynamic stopping, at what probability
-                threshold do we stop spelling?
-            use_row_column (bool): row-column (true) or other stimulus presentation paradigm?
-            label_type (str): 'scores' (sum of classifier scores) or
-                'likelihoods' (Bayesian algorithm)
-            set_ada_threshold (bool): set character score threshold for
-                expanding training set with unsupervised data (unlabelled
-                'online' data and classifier-predicted labels)?
-            ada_threshold_val (float): threshold value for above
-            get_performance (bool): collect data to calculate performance
-                measures (e.g. sum of true positives for each trial)?
-                
+        """Set up speller.
         """
         self.spelling_acc = np.zeros([num_sessions,num_subjects])-1
         self.num_correctly_spelled_chars = np.zeros([num_sessions,num_subjects],dtype='int')
@@ -219,9 +186,11 @@ class Speller:
         self.update_pdfs(sub_ind)
     
     def unsupervised_update(self,sub_ind,sess_ind,data,labels,char_ranges,char_inds_overall):
-        # Update adaptive classifier with trial(s) if appropriate
-        # Discard trial if imposing threshold and that threshold is not met by
-        # the trial
+        """Update adaptive classifier with trial(s) if appropriate.
+        
+        Discard trial if imposing threshold and that threshold is not met by
+        the trial.
+        """
         include_trial = np.array([(not self.set_ada_threshold) or val>self.ada_threshold
                                   for val in self.threshold_vals[char_inds_overall].flatten()])
         self.included_trials_session[char_inds_overall] = include_trial
@@ -263,7 +232,6 @@ class Speller:
         self.tr_pdfs = speller_obj.tr_pdfs
     
     def initialize_session(self,num_chars,M,label_type):
-        #self.correctly_spelled = np.zeros(num_chars,dtype='bool')
         if self.label_type[0] == 's': # scores
             # CCRF: cumulative character response function (e.g. character probability)
             self.ccrf = np.zeros([M,num_chars])
@@ -286,7 +254,6 @@ class Speller:
     
     def initialize_trial(self):
         self.not_selected = True
-        # self.ds_ind = None
     
     def simulate_epoch(self,score,flashed_chars_bool,char_ind):
         # If using dynamic stopping and a character's CCRF has exceeded the
@@ -294,7 +261,7 @@ class Speller:
         if self.not_selected or not self.is_dynamic:
             l = self.eval_pdfs(score)
             self.ccrf[:,char_ind] = bayesian_ccrf(
-                self.ccrf[:,char_ind],l[0],l[1],flashed_chars_bool) # !
+                self.ccrf[:,char_ind],l[0],l[1],flashed_chars_bool)
         if self.is_dynamic and np.max(self.ccrf[:,char_ind])>self.ds_threshold_val:
             self.ds_ind = char_ind
             self.not_selected = False
@@ -320,7 +287,6 @@ class Speller:
         if prediction_epoch_inds:
             self.predictions[prediction_epoch_inds] = predict_labels(flash_groups,sorted_ccrf_ind[-1]+1)
             if self.get_performance and np.size(truth_labels):
-                # !!!
                 if (not (hasattr(self,'set_ada_threshold') and self.set_ada_threshold)) or sorted_ccrf[-1]>=self.ada_threshold:
                     self.evaluate_performance(trial_ind_overall,prediction_epoch_inds,truth_labels)
     
@@ -330,9 +296,9 @@ class Speller:
         Args:
             trial_ind_overall (int): index of trial being analyzed (relative
                 to the start of the user's spelling session)
-            prediction_epoch_inds (array): indices of self.predictions
+            prediction_epoch_inds (Array['M',int]): indices of self.predictions
                 corresponding to trial
-            truth_labels (array): truth labels for epochs in trial
+            truth_labels (Array['N',bool]): truth labels for epochs in trial
         """
         # Number of actual target flash groups that were correctly predicted
         self.num_true_pos[trial_ind_overall] = np.sum(
@@ -358,16 +324,17 @@ class Speller:
         update spelling accuracy using new predicted targets.
         
         Args:
-            lang_models (list): list of language model objects to use in
+            lang_models (list[LM_letter]): list of language model objects to use in
                 Viterbi algorithm
             grid_objects (str): string of potential grid selections (in order)
-            trial_inds_overall (list): indices of Speller.ccrf to apply language model to
-            flash_groups_wd (array): flash groups corresponding to current word
-            trial_ranges_wd (list): each element contains the range of epoch
+            trial_inds_overall (list[int]): indices of Speller.ccrf to apply language
+            	model to
+            flash_groups_wd (Array['W,H',int]): flash groups corresponding to current word
+            trial_ranges_wd (list[range]): each element contains the range of epoch
                 indices in flash_groups_wd corresponding to a trial (used to
                 spell a letter from the current word)
-            prediction_epoch_inds [array]: indices of predictions to updates
-            target_chars (list): actual target characters for current word
+            prediction_epoch_inds (Array[int]): indices of predictions to updates
+            target_chars (list[str]): actual target characters for current word
             truth_labels_wd (array): ground truth labels for current word
         """
         # Get predicted targets for each trial after applying language model
@@ -389,7 +356,6 @@ class Speller:
                     truth_labels_wd[epoch_inds_wd])
     
     def eval_session(self,sub_ind,sess_ind,test_labels,chars_spelled_bool):
-        # self.auc[sess_ind,sub_ind] = get_auc(test_labels,self.session_te_scores) # !
         # A trial may have been skipped if an error occurred during recording
         self.num_correctly_spelled_chars[sess_ind,sub_ind] = np.sum(self.correctly_spelled[
                 chars_spelled_bool])
@@ -402,8 +368,6 @@ class Speller:
                 np.sum(self.included_trials_session)
             # Characters must have been spelled and added to expanded
             # training set.
-            #div = np.sum(np.all(np.vstack(
-                    #[self.included_trials_session,chars_spelled_bool]),axis=0))
             if self.ets_size_chars[sess_ind,sub_ind] > 0:
                 self.ets_num_correctly_spelled_chars[sess_ind,sub_ind] = \
                     np.sum(self.correctly_spelled[self.included_trials_session])
@@ -559,11 +523,11 @@ def bayesian_ccrf(priors,likelihood_nt,likelihood_t,flashed_chars_bool,eps=1e-10
     Spelling board has M characters.
     
     Args:
-        priors ((M,) array): prior probability of each character being the
+        priors (Array['M',float]): prior probability of each character being the
                             target character
         likelihood_nt (float): non-target probability density function value
         likelihood_t (float): target probability density function value
-        flashed_chars_bool ((M,) array of bools): whether a character was
+        flashed_chars_bool (Array['M',bool]): whether a character was
                             included in the flashed group
     """
     priors[flashed_chars_bool] *= likelihood_t+eps
@@ -636,10 +600,10 @@ def predict_labels(flash_groups,char_code):
 def predict_word(flash_groups,char_codes,char_ranges):
     """
     Args:
-        flash_groups ((M,N) array): flash groups corresponding to M epochs;
+        flash_groups (Array['M,N',int]): flash groups corresponding to M epochs;
             each flash group has up to N-1 characters
-        char_codes ((P,) array): character codes corresponding to P trials
-        char_start ((P,) array): start index for each trial (letter) in word
+        char_codes (Array['P',int]): character codes corresponding to P trials
+        char_start (Array['P',int]): start index for each trial (letter) in word
     """
     predictions = np.zeros(np.shape(flash_groups)[0],dtype='bool')
     for char_ind,char_code in enumerate(char_codes):
@@ -699,44 +663,3 @@ def plot_ccrf(ccrf,target_inds,ylims=None,label_type='Probability',highlight_cha
             target_inds[c]+1,target_inds[c]],color='k')
     
     plt.gcf().set_size_inches(6,5)
-
-def extract_eeg_from_df(df,sample_window=195,offset=0):
-    """
-    Extract P300 speller time-locked EEG signals from user data
-    Extract EEG signals from a dataframe containing the columns eeg_signals,
-    fs (sampling frequency), task_onset (timing of flash onsets, in samples),
-    and task_labels (type of flash). The time window of each signal is given by
-    wlen
-    
-    """
-    total_num_obs = int(sum([df.iloc[i].num_obs for i in range(len(df))]))#sum([np.shape(i)[0] for i in df['task_onset']])
-    # Assumes all signals have the same sampling frequency
-    eeg_responses = np.empty((total_num_obs,sample_window,len(df.iloc[0].channels[0])))
-    eeg_responses[:] = np.nan
-    labels = np.zeros(total_num_obs,dtype=bool)
-    curr_obs=0
-    for file in range(np.shape(df)[0]):
-        last_obs = curr_obs
-        start_ind = df.iloc[file].task_onset+offset
-        end_ind=start_ind+sample_window
-        eeg_signals = df.iloc[file].eeg_signals
-        for obs in range(len(df.iloc[file].task_onset)):
-            eeg_responses[curr_obs,:,:] = np.squeeze(
-                eeg_signals[start_ind[obs]:end_ind[obs],np.concatenate(df.iloc[file].channels)])
-            curr_obs+=1
-        labels[last_obs:curr_obs] = df.iloc[file].task_labels
-    return eeg_responses,labels
-
-def save_data_pickle(df,folder_path,subj_str):
-    """
-    Save data to file
-    """
-    filename = folder_path+subj_str
-    with open(filename) as f:
-        pickle.dump(df,f)
-        
-def load_data_pickle(df,folder_path,subj_str):
-    filename = search_folder(folder_path,subj_str)[0]
-    with open(filename) as f:
-        df = pickle.load(f)
-    return df
