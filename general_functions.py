@@ -5,7 +5,7 @@ Created on Thu Jun  3 16:16:30 2021
 
 @author: xinlin.chen@duke.edu
 
-Last edited 23/01/23
+Last edited 2023/01/24
 """
 
 import csv
@@ -14,6 +14,13 @@ from matplotlib import pyplot as plt
 import numpy as np
 from time import time, sleep
 from string import ascii_uppercase
+from typing import TypeVar, Generic
+
+Shape = TypeVar("Shape")
+DType = TypeVar("DType")
+
+class Array(np.ndarray, Generic[Shape, DType]):
+    pass
 
 def read_csv(file,delimiter=','):
     with open(file,newline='') as f:
@@ -42,18 +49,6 @@ def count_torch_model_params(model):
         count += pcount
     return count
 
-def load_pkl(file):
-    with open(file,'rb') as f:
-        data = load(f)
-    return data
-
-def save_pkl(file,data):
-    with open(file,'wb') as f:
-        dump(data,f)
-
-def get_arr_bounds(arr):
-    return [min(arr),max(arr)]
-
 def offset_range(range_obj,offset):
     return range(range_obj.start+offset,range_obj.stop+offset)
 
@@ -64,7 +59,8 @@ def list2str(list_var,format_opt=None,delimiter=','):
         return '['+delimiter.join([str(el) for el in list_var])+']'
 
 def get_available_gpu(mem_req=9000, interval=60,verbose=False):
-    """
+    """Wait for GPU fitting memory constraints.
+    
     Query GPUs every <interval> seconds until there is a GPU with at least
     <mem_req> MB free.
     """
@@ -88,7 +84,8 @@ def get_available_gpu(mem_req=9000, interval=60,verbose=False):
     return device_to_use
 
 def retrieve_or_save_abbrev(path,full_string,save=True,delimiter=';'):
-    """
+    """Abbreviate filenames into code.
+    
     Running into issue of filenames being too long. Pick some variable to
     abbreviate. It will be replaced by a code ('A', 'B', ...'Z', 'AA', ...)
     
@@ -153,17 +150,18 @@ def increment_alphabet_code(curr_code):
     return new_code
 
 def filter_abbrevs(path,filter_fun,delimiter=';'):
-    """
+    """Filter strings by filter_fun and return abbreviated codes of those that pass.
+    
     Check un-abbreviated strings in file against filter_fun. For strings
     that match, return the string as well as the code used to abbreviate the 
     string
     Args:
-        path (string): path to which abbreviated codes were saved
-        filter_fun (function handle): function to use to filter abbreviations
-         (e.g. abbreviation must be list of X numbers)
-        delimiter (string): column delimiter
+        path (str): path to which abbreviated codes were saved
+        filter_fun (Callable[str,bool]): function to use to filter abbreviations
+        	(e.g. abbreviation must be list of X numbers)
+        delimiter (str): column delimiter
     Returns:
-        filtered_abbrevs (list of tuples): list of (code,abbrev) that are
+        filtered_abbrevs (list[tuple]): list of (code,abbrev) that are
             passed by filter
     """
     with open(path,'r') as f:
@@ -174,6 +172,8 @@ def filter_abbrevs(path,filter_fun,delimiter=';'):
     return filtered_abbrevs
 
 def unabbrev(path,code,delimiter=';'):
+	"""Decode abbreviation.
+	"""
     with open(path,'r') as f:
         codes, abbrevs = zip(*[(row.split(delimiter)[0],
                                 row.split(delimiter)[1].strip())

@@ -5,12 +5,11 @@ Created on Fri May  7 14:29:28 2021
 
 @author: xinlin.chen@duke.edu
 
-Last edited 23/01/23
+Last edited 2023/01/24
 """
 
 import numpy as np
 import math
-#from pyedflib import highlevel
 from scipy.interpolate import griddata as gd
 from custom_topomap import mneviz_topomap_fast, mneviz_topomap
 from warnings import filterwarnings
@@ -18,40 +17,20 @@ from general_functions import deal
 from torch import Tensor, LongTensor
 from mne.io import read_raw_edf
 from dataclasses import field
+from general_functions import Array
 
-
-def findEEGCh(headers):
-    """
-    Finds EDF signal channels corresponding to EEG channels
-    """
-    bl = np.zeros(len(headers),dtype='bool')
-    for idx,el in enumerate(headers):
-        bl[idx] = el['label'][0:3]=='EEG'
-    return bl
-
-def getEEGCoordDF(ch_info,input_ch_names):
-    """
-    Get rows of Pandas dataframe (containing channel names and coordinates)
-    corresponding to channel names present in 'input_ch_names'
-    Args:
-        ch_info (Pandas dataframe with columns 'ch_names', 'x', and 'y')
-        input_ch_names (list of str)
-    Returns:
-        chs_to_import (Pandas dataframe: columns <ch_col>, 'x', and 'y'):
-            filtered rows of ch_info corresponding to elements in input_ch_names
-    """
-    inds = ch_info['ch_names'].searchsorted(input_ch_names)
-    return ch_info.iloc[inds]
 
 def getEEGCoord(ch_names_dict,input_ch_names):
     """
     Get values of dict (key: channel name, value: 2D coordinates)
     corresponding to channel names in 'input_ch_names'
+    
     Args:
-        ch_names_dict (dict)
-        input_ch_names (N-length list of str)
+        ch_names_dict (dict[str,Array[2,float]]): channel names and corresponding 2D
+        	coordinates
+        input_ch_names (list[str]): N channel names
     Returns:
-        ch_coords ((N,2) array): 2D EEG electrode .coordinates
+        ch_coords (Array['N,2',float]): 2D EEG electrode coordinates
     """
     ch_coords = np.zeros([len(input_ch_names),2])
     for row, ch in enumerate(input_ch_names):
@@ -59,7 +38,11 @@ def getEEGCoord(ch_names_dict,input_ch_names):
     return ch_coords
 
 def getGraphEdgeMatrix(node_posns):
-    """From mx2 array of 2D node positions, get mxm matrix of node-node edges
+    """From mx2 array of 2D node positions, get mxm matrix of node-node edges.
+    
+    Args:
+    	node_posns (Array['M,2',float]): Node positions
+    	metric (Array['M,M',float]): Inter-node distances
     """
     # For EEG, this is electrode-electrode distances from eegkit cap coordinates
     metric = np.zeros([len(node_posns),len(node_posns)])
@@ -99,19 +82,19 @@ def getSortedChSubset(sorted_ch_inds,sorted_ch_distances,channels):
     arrays containing values ranging from 0 to 2, where 5->0, 2->1, 6->2
     
     Args:
-        sorted_ch_inds (num_total_channels,num_total_channels-1 array):
+        sorted_ch_inds (Array['num_total_channels,num_total_channels-1,',int]):
             for each row X, contains indices of channels, sorted by proximity
             to channel X
-        sorted_ch_distances (num_total_channels,num_total_channels-1 array)
+        sorted_ch_distances (Array['num_total_channels,num_total_channels-1',float])
             for each row X, contains sorted distances between channel X and
             other channels
-        channels (num_channels array): subset of channels to extract
+        channels (Array['num_channels',int]): subset of channels to extract
     
     Returns:
-        n (num_channels,num_channels array): subset of sorted_ch_inds
+        n (Array['num_channels,num_channels',int]): subset of sorted_ch_inds
             for channels in 'channels'. Original channel indices are replaced
             according to their order of appearance in 'channels'.
-        d (num_channels, num_channels array): subset of sorted_ch_distances
+        d (Array['num_channels, num_channels',float]): subset of sorted_ch_distances
             for channels in 'channels'
     """
     n = np.zeros([len(channels),len(channels)],dtype='int')
@@ -140,18 +123,18 @@ def getGraphEdges(sorted_ch_inds,sorted_ch_distances,boundary=1.0, \
     both directions.
     
     Args:
-        sorted_ch_inds (num_nodes,num_nodes-1 array): channel neighbors.
+        sorted_ch_inds (Array['num_nodes,num_nodes-1',inds]): channel neighbors.
             Each row X contains electrode channel indices, sorted by proximity
             to electrode X
-        sorted_ch_inds (num_nodes,num_nodes-1 array): similar to
+        sorted_ch_distances (Array['num_nodes,num_nodes-1',float]): similar to
             sorted_ch_inds, except each element corresponds to the inter-
             channel distance in cm, rather than the channel index
         radius (float): neighborhood radius in cm
         maxN (int): maximum number of edges per node
     Returns:
-        edge_index (2,num_edges LongTensor): edge-edge connections in COO
+        edge_index (LongTensor[2,num_edges]): edge-edge connections in COO
             format
-        edge_attr (num_edges,1 Tensor): edge feature vector containing
+        edge_attr (Tensor[num_edges]): edge feature vector containing
             inter-channel distances
     """
     edge_index = np.zeros([2,np.shape(sorted_ch_inds)[0]*maxN],dtype='int')
@@ -177,9 +160,9 @@ def mnemap2img_fast(signals,ch_coords,sample_axis,image_interp='bicubic',map_siz
     Convert EEG signals with known 2D channel coordinates to image using
     function adapted from mne.viz.plot_topomap() v0.23.0
     Args:
-        signals ((obs,sample,channel) or (obs,channel,sample) array):
-            EEG epochs
-        ch_coords ((channel,2) array): EEG channel coordinates (2D)
+        signals (Array['obs,X,Y',float]): EEG signals. Dimensons ay be (obs,sample,channel)
+        	or (obs,channel,sample).
+        ch_coords (Array['channel,2',float]): EEG channel coordinates (2D)
         sample_axis (int): axes corresponding to sample
         interp (str): interpolation method ('none', 'nearest', 'bilinear',
                       'bicubic', 'spline16','spline36', 'hanning', 'hamming',
@@ -188,7 +171,7 @@ def mnemap2img_fast(signals,ch_coords,sample_axis,image_interp='bicubic',map_siz
         map_size (int): square map size in pixels
         num_cols (int): number of maps per row of 'img'
     Returns:
-        img ((sample//num_cols+1)*l,l*num_cols array): image containing series
+        img (Array['sample//num_cols+1)*l,l*num_cols',float]): image containing series
             of topographic maps (1 per sample)
     """
     # Find regions to mask
@@ -215,17 +198,6 @@ def mnemap2img_fast(signals,ch_coords,sample_axis,image_interp='bicubic',map_siz
     # Initialize image
     img = np.zeros([map_size*num_rows,map_size*num_cols])
     # Fill up image with masked maps
-    """
-    # For loop by sample
-    for sample in range(np.shape(signals)[sample_axis]):
-        # Masks area outside skull
-        mne_maps[:,:,sample][mask] = circle
-        # Assign map to image region
-        img[sample//num_cols*l:(sample//num_cols+1)*l,
-            (sample%num_cols)*l:(sample%num_cols+1)*l] = mne_maps[:,:,sample]
-        # np.flip(mne_maps[:,:,sample],axis=0)
-    """
-    # Vectorized masking (faster)
     mne_maps[mask[0],mask[1],:] = circle[:,None]
     # For loop by row
     for row_ind in range(num_rows):
@@ -259,18 +231,19 @@ def eeg2img(signals,ch_coords,sample_axis,interp='cubic',map_size=49,num_cols=6,
     """
     Convert EEG signals with known 2D channel coordinates to image using
     scipy's griddata()
+    
     Args:
-        signals ((sample,channel,observation) array): EEG signals
-        ch_coords ((channel,2) array): EEG channel coordinates (2D)
+        signals (Array['sample,channel,observation',float]): EEG signals
+        ch_coords (Array['channel,2',float]): EEG channel coordinates (2D)
         sample_axis (int): axes corresponding to sample
         interp (str): interpolation method ('cubic','linear','nearest')
         l (int): square map size in pixels
         num_cols (int): number of maps per row of 'img'
         pad (bool): whether to pad 'nans' outside of interpolated regions when
                     using 'cubic' and 'linear'
-        pad_coords ((X,2) array): coordinates of positions to pad
+        pad_coords (Array['X,2',float]): coordinates of positions to pad
     Returns:
-        img (array): image representations of EEG signals, where each sample
+        img (Array): image representations of EEG signals, where each sample
                      becomes a topographic map of the skull
     """
     # Initialize image
@@ -292,13 +265,6 @@ def eeg2map(ch_coords,signal_sample,interp='cubic',pad=False,pad_coords=[],bound
     # Y and X flipped to get correct output
     grid_y, grid_x = np.mgrid[bounds[2]:bounds[3]:steps[1],
                               bounds[0]:bounds[1]:steps[0]]
-    """
-    if pad:
-        # Fill in missing electrodes as zeros/mean value - results in artifacts
-        ch_coords = np.concatenate([ch_coords,pad_coords],axis=0)
-        signal_sample = np.concatenate([signal_sample,
-                                        np.zeros(len(pad_coords))+np.mean(signal_sample)])
-    """
     grid = gd(ch_coords,signal_sample,(grid_x,grid_y),method=interp)#fill_value=0)
     if pad:
         # Fill in nan values with nearest interpolation
