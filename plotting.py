@@ -16,21 +16,21 @@ from typing import Union
 
 
 def split_cmap(cmap_a_str,cmap_b_str,y,split,a_range=[0,1],b_range=[0,1],flip_a=False,flip_b=True):
-	"""Set up dual colormaps (e.g. one for pos, one for neg results).
-	
-	Args:
-		cmap_a_str (str): name of colormap A (must be built-in colormap), e.g., 'Greys'
-		cmap_b_str (str): name of colormap B, e.g., 'winter'
-		y (Array[float]): data being plotted
-		split (float): point at which colormap changes
-		a_range (list[Union[float,int]]): range of colormap A to show
-		b_range (list[Union[float,int]]): range of colormap B to show
-		flip_a (bool): flip colormap A?
-		flip_b (bool): flip colormap B?
-	
-	Returns:
-		new_cmap (colors.LinearSegmentedColormap): dual colormap
-	"""
+    """Set up dual colormaps (e.g. one for pos, one for neg results).
+    
+    Args:
+        cmap_a_str (str): name of colormap A (must be built-in colormap), e.g., 'Greys'
+        cmap_b_str (str): name of colormap B, e.g., 'winter'
+        y (Array[float]): data being plotted
+        split (float): point at which colormap changes
+        a_range (list[Union[float,int]]): range of colormap A to show
+        b_range (list[Union[float,int]]): range of colormap B to show
+        flip_a (bool): flip colormap A?
+        flip_b (bool): flip colormap B?
+    
+    Returns:
+        new_cmap (colors.LinearSegmentedColormap): dual colormap
+    """
     cmap_a = cm.get_cmap(cmap_a_str)
     cmap_b = cm.get_cmap(cmap_b_str)
     
