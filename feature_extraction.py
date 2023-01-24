@@ -5,28 +5,28 @@ Created on Mon Mar 22 02:16:24 2021
 
 @author: xinlin.chen@duke.edu
 
-Last edited 23/01/23
+Last edited 2023/01/24
 """
 
 import math
 import numpy as np
 import pycwt
-    
+from general_functions import Array    
 
 def extract_ba_feats(signal,decimation_f=20,fs=256):
     """
     Extract block-averaged features from an array of P300 speller EEG epochs
     
     Args:
-    	signal ((num_obs, num_samples, num_channels) array): EEG data
+    	signal (Array['num_obs, num_samples, num_channels',float]): EEG data
     	decimation_f (int): decimation frequency (Hz)
     	fs (int): sampling frequency (Hz)
     Returns:
-    	features ((num_obs, num_features) array): extracted features
+    	features (Array['num_obs, num_features',float]): extracted features
     """
     # Each observation already contains the correct time window
     
-    total_num_obs = np.shape(signal)[0]#sum([np.shape(i)[0] for i in df['task_onset']])
+    total_num_obs = np.shape(signal)[0]
     sampling_factor = math.ceil(fs/decimation_f)
     feats_per_channel = np.floor(np.shape(signal)[1]/sampling_factor)
     sample_window = int(feats_per_channel*sampling_factor)
@@ -53,14 +53,14 @@ def extract_wv_feats(signal,fs,nscales=20,freqlims=[0.5,30]):
     Extract time-frequency features for windows of EEG data within a signal.
     
     Args:
-        signal ((num_obs,num_samples) array): EEG signal segments
+        signal (Array['num_obs,num_samples',float]): EEG signal segments
         fs (float): sampling frequency (Hz)
         nscales (int): number of wavelet scales (affects resolution in
                                                  frequency domain)
-        freqlims ((2,) array): frequency limits in Hz for wavelet transform
+        freqlims (Array[2,int]): frequency limits in Hz for wavelet transform
         
     Returns:
-        features (num_obs x num_channels x nscales x sample_window array):
+        features (Array['num_obs,num_channels,nscales,sample_window',float]):
             feature matrix
         
     """
