@@ -5,18 +5,32 @@ Created on Thu Apr  1 14:08:23 2021
 
 @author: xinlin.chen@duke.edu
 
-Last edited 23/01/23
+Last edited 2023/01/24
 """
 
 from matplotlib import colors, cm
 from matplotlib import pyplot as plt
 import numpy as np
+from general_functions import Array
+from typing import Union
 
 
 def split_cmap(cmap_a_str,cmap_b_str,y,split,a_range=[0,1],b_range=[0,1],flip_a=False,flip_b=True):
-	"""
-	If you want to work with two colormaps (e.g. one for pos, one for neg results)
-	"""
+    """Set up dual colormaps (e.g. one for pos, one for neg results).
+    
+    Args:
+        cmap_a_str (str): name of colormap A (must be built-in colormap), e.g., 'Greys'
+        cmap_b_str (str): name of colormap B, e.g., 'winter'
+        y (Array[float]): data being plotted
+        split (float): point at which colormap changes
+        a_range (list[Union[float,int]]): range of colormap A to show
+        b_range (list[Union[float,int]]): range of colormap B to show
+        flip_a (bool): flip colormap A?
+        flip_b (bool): flip colormap B?
+    
+    Returns:
+        new_cmap (colors.LinearSegmentedColormap): dual colormap
+    """
     cmap_a = cm.get_cmap(cmap_a_str)
     cmap_b = cm.get_cmap(cmap_b_str)
     
@@ -36,7 +50,7 @@ def plot_bar(y,**kwargs):
     Plot multiple variables in bar plot. Axis and figure settings can be passed
     in as dictionary. Figure setting keys have 'fig_' prepended
     Args:
-        y (mxn array): bar heights. Each column is a different data series
+        y (Array['m,n',float]): bar heights. Each column is a different data series.
     """
     width=0.7/np.shape(y)[1]
     step=width+0.5*(1-np.shape(y)[1]*width)/np.shape(y)[1]
