@@ -110,9 +110,33 @@ def getSortedChSubset(sorted_ch_inds,sorted_ch_distances,channels):
     return -n, d
 
 def mne_readedf(path,**kwargs):
-    """Return data, channel names, sampling frequency
+    """Read in EEG data and metadata from EDF files.
+    
+    Read in data from EDF files using mne.io.read_raw_edf, with option to
+    only read in segment of file.
+    
+    Args:
+        path (str): path of EDF file.
+        preload (bool): optional - whether to load in EEG data.
+        start (int): optional - start sample index, if extracting file segment
+        end (int): optional - final sample index, if extracting file segment
+    
+    Returns:
+        Returns EEG data, channel names, and sampling frequency.
     """
-    data = read_raw_edf(path,**kwargs)
+    if kwargs.get('preload',False) and ('start' in kwargs and 'end' in kwargs):
+        # To speed things up, load in only the relevant portion of the EDF data
+        kwargs['preload'] = False
+        start = kwargs.pop('start')
+        end = kwargs.pop('end')
+        data = read_raw_edf(path,**kwargs)
+        # Load relevant samples from relevant channels (if excluding channels,
+        # relevant channel subset is already selected above)
+        data._data = data._read_segment(start,end,range(len(data.ch_names)))
+    else:
+        data = read_raw_edf(path,**kwargs)
+        if kwargs.get('preload',False):
+            data._data = []
     return data._data,data.ch_names,data.info['sfreq']
 
 def getGraphEdges(sorted_ch_inds,sorted_ch_distances,boundary=1.0, \
